@@ -183,16 +183,16 @@ PHP_METHOD(PeerConnection, addRemoteCandidate) {
     int handle = peer_require_open(ZEND_THIS);
     if (handle < 0) RETURN_THROWS();
     if (ZSTR_LEN(candidate) == 0 || ZSTR_LEN(candidate) > RYZERTC_MAX_ICE_CANDIDATE ||
-        memchr(ZSTR_VAL(candidate), '\\0', ZSTR_LEN(candidate)) != NULL ||
-        memchr(ZSTR_VAL(candidate), '\\n', ZSTR_LEN(candidate)) != NULL ||
-        memchr(ZSTR_VAL(candidate), '\\r', ZSTR_LEN(candidate)) != NULL) {
+        memchr(ZSTR_VAL(candidate), '\${k}', ZSTR_LEN(candidate)) != NULL ||
+        memchr(ZSTR_VAL(candidate), '\${k}', ZSTR_LEN(candidate)) != NULL ||
+        memchr(ZSTR_VAL(candidate), '\${k}', ZSTR_LEN(candidate)) != NULL) {
         zend_value_error("ICE candidate must be a single nonempty line of at most 8 KiB");
         RETURN_THROWS();
     }
     if (ZSTR_LEN(mid) == 0 || ZSTR_LEN(mid) > RYZERTC_MAX_ICE_MID ||
-        memchr(ZSTR_VAL(mid), '\\0', ZSTR_LEN(mid)) != NULL ||
-        memchr(ZSTR_VAL(mid), '\\n', ZSTR_LEN(mid)) != NULL ||
-        memchr(ZSTR_VAL(mid), '\\r', ZSTR_LEN(mid)) != NULL) {
+        memchr(ZSTR_VAL(mid), '\${k}', ZSTR_LEN(mid)) != NULL ||
+        memchr(ZSTR_VAL(mid), '\${k}', ZSTR_LEN(mid)) != NULL ||
+        memchr(ZSTR_VAL(mid), '\${k}', ZSTR_LEN(mid)) != NULL) {
         zend_value_error("ICE media ID must be a single nonempty line of at most 128 bytes");
         RETURN_THROWS();
     }
@@ -244,7 +244,7 @@ PHP_METHOD(PeerConnection, remoteDescription) {
         zend_throw_error(NULL, "Native remote SDP read failed (%d)", result);
         RETURN_THROWS();
     }
-    const char *end = memchr(buffer, '\\0', sizeof(buffer));
+    const char *end = memchr(buffer, '\${k}', sizeof(buffer));
     if (end == NULL) {
         zend_throw_error(NULL, "Native remote SDP is not NUL terminated");
         RETURN_THROWS();
