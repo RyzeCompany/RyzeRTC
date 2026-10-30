@@ -15,6 +15,7 @@ if test "$PHP_RYZERTC" != "no"; then
   fi
   PHP_ADD_INCLUDE([$PHP_RYZERTC/include])
   PHP_ADD_LIBRARY_WITH_PATH([datachannel], [$PHP_RYZERTC/lib], [RYZERTC_SHARED_LIBADD])
+  PHP_ADD_LIBRARY([pthread], [1], [RYZERTC_SHARED_LIBADD])
   PHP_SUBST([RYZERTC_SHARED_LIBADD])
-  PHP_NEW_EXTENSION([ryzertc], [src/ryzertc.c], [$ext_shared],, [-std=c11])
+  PHP_NEW_EXTENSION([ryzertc], [src/ryzertc.c], [$ext_shared],, [-std=c11 -pthread])
 fi
