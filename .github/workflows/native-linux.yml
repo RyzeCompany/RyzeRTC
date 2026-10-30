@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential autoconf automake libtool bison re2c cmake ninja-build \
-            git curl xz-utils pkg-config libssl-dev libxml2-dev zip
+            git curl xz-utils pkg-config libssl-dev libxml2-dev zip gdb
       - name: Build pinned PHP 8.4.27 ZTS with matching phpize
         shell: bash
         run: |
@@ -82,7 +82,27 @@ jobs:
           test -s modules/ryzertc.so
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.build/backend-install/lib"
           php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" --ri ryzertc
-          php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php
+          echo "[RyzeRTC] Baseline: load and unload module without peers"
+          php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" -r 'echo "No-peer test OK\n";'
+          echo "[RyzeRTC] Native peer lifecycle: run under GDB for verified exit status and stack trace"
+          set +e
+          timeout 45s gdb -q --batch \
+            -ex 'set pagination off' \
+            -ex 'set print thread-events off' \
+            -ex 'run' \
+            -ex 'thread apply all bt 20' \
+            --args php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php \
+            2>&1 | tee .build/ryzertc-gdb.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eq 'Program received signal SIGSEGV|Program terminated with signal SIGSEGV|Segmentation fault' .build/ryzertc-gdb.log; then
+            echo "::error::RyzeRTC SIGSEGV in native shutdown; inspect GDB backtrace"
+            exit 139
+          fi
+          if [[ "$status" -ne 0 ]] || ! grep -F 'exited normally' .build/ryzertc-gdb.log >/dev/null; then
+            echo "::error::RyzeRTC native lifecycle did not terminate normally (gdb status=$status)"
+            exit 1
+          fi
       - name: Validate against exact official PocketMine PHP used by Egg
         shell: bash
         run: |
