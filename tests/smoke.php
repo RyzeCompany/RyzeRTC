@@ -15,6 +15,16 @@ if ($features['dataChannels'] || $features['asyncEventQueue']) {
     throw new RuntimeException('Do not claim unimplemented capabilities');
 }
 $peer = new RyzeRTC\PeerConnection("127.0.0.1", 0, false);
+if ($peer->remoteDescription() !== null) {
+    throw new RuntimeException('Unexpected remote SDP before offer');
+}
+foreach ([['', '0'], ["bad\\ncandidate", '0'], [str_repeat('x', 8193), '0'], ['candidate:1 1 udp 1 127.0.0.1 19132 typ host', '']] as [$candidate, $mid]) {
+    try {
+        $peer->addRemoteCandidate($candidate, $mid);
+        throw new RuntimeException('Invalid ICE candidate was accepted');
+    } catch (ValueError) {
+    }
+}
 $peer->close();
 $peer->close();
 try {
