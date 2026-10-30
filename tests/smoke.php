@@ -1,0 +1,36 @@
+<?php
+declare(strict_types=1);
+
+if (!extension_loaded('ryzertc')) {
+    throw new RuntimeException('Missing RyzeRTC native module');
+}
+if (RyzeRTC\Runtime::apiVersion() !== 1) {
+    throw new RuntimeException('Unexpected RyzeRTC API version');
+}
+$features = RyzeRTC\Runtime::capabilities();
+if (!$features['peerConnection'] || !$features['iceUdpMux']) {
+    throw new RuntimeException('Native PeerConnection backend unavailable');
+}
+if ($features['dataChannels'] || $features['asyncEventQueue']) {
+    throw new RuntimeException('Do not claim unimplemented capabilities');
+}
+$peer = new RyzeRTC\PeerConnection("127.0.0.1", 0, false);
+$peer->close();
+$peer->close();
+try {
+    $peer->localDescription();
+    throw new RuntimeException('Closed peer accepted an operation');
+} catch (Error $e) {
+    if (!str_contains($e->getMessage(), 'closed')) throw $e;
+}
+try {
+    new RyzeRTC\PeerConnection("invalid.example", 0, false);
+    throw new RuntimeException('Invalid bind address accepted');
+} catch (ValueError) {
+}
+try {
+    new RyzeRTC\PeerConnection("127.0.0.1", 0, true);
+    throw new RuntimeException('UDP mux without a port accepted');
+} catch (ValueError) {
+}
+echo "RyzeRTC native Phase 1 OK\n";
