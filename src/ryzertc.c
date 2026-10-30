@@ -17,6 +17,8 @@
 #include <arpa/inet.h>
 
 #define RYZERTC_MAX_SDP 65536
+#define RYZERTC_MAX_ICE_CANDIDATE 8192
+#define RYZERTC_MAX_ICE_MID 128
 
 static zend_class_entry *runtime_ce;
 static zend_class_entry *peer_ce;
@@ -70,6 +72,10 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_peer_construct, 0, 0, 0)
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_offer, 0, 1, IS_VOID, 0)
     ZEND_ARG_TYPE_INFO(0, sdp, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_candidate, 0, 2, IS_VOID, 0)
+    ZEND_ARG_TYPE_INFO(0, candidate, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, mid, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_void, 0, 0, IS_VOID, 0)
 ZEND_END_ARG_INFO()
@@ -164,6 +170,39 @@ PHP_METHOD(PeerConnection, setRemoteOffer) {
     }
 }
 
+/**
+ * ICE candidates are added only after verifying the incoming signaling
+ * request; this API is transport-only and does not authenticate a user.
+ */
+PHP_METHOD(PeerConnection, addRemoteCandidate) {
+    zend_string *candidate, *mid;
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_STR(candidate)
+        Z_PARAM_STR(mid)
+    ZEND_PARSE_PARAMETERS_END();
+    int handle = peer_require_open(ZEND_THIS);
+    if (handle < 0) RETURN_THROWS();
+    if (ZSTR_LEN(candidate) == 0 || ZSTR_LEN(candidate) > RYZERTC_MAX_ICE_CANDIDATE ||
+        memchr(ZSTR_VAL(candidate), '\\0', ZSTR_LEN(candidate)) != NULL ||
+        memchr(ZSTR_VAL(candidate), '\\n', ZSTR_LEN(candidate)) != NULL ||
+        memchr(ZSTR_VAL(candidate), '\\r', ZSTR_LEN(candidate)) != NULL) {
+        zend_value_error("ICE candidate must be a single nonempty line of at most 8 KiB");
+        RETURN_THROWS();
+    }
+    if (ZSTR_LEN(mid) == 0 || ZSTR_LEN(mid) > RYZERTC_MAX_ICE_MID ||
+        memchr(ZSTR_VAL(mid), '\\0', ZSTR_LEN(mid)) != NULL ||
+        memchr(ZSTR_VAL(mid), '\\n', ZSTR_LEN(mid)) != NULL ||
+        memchr(ZSTR_VAL(mid), '\\r', ZSTR_LEN(mid)) != NULL) {
+        zend_value_error("ICE media ID must be a single nonempty line of at most 128 bytes");
+        RETURN_THROWS();
+    }
+    int result = rtcAddRemoteCandidate(handle, ZSTR_VAL(candidate), ZSTR_VAL(mid));
+    if (result != RTC_ERR_SUCCESS) {
+        zend_throw_error(NULL, "Native ICE candidate rejected (%d)", result);
+        RETURN_THROWS();
+    }
+}
+
 PHP_METHOD(PeerConnection, beginAnswer) {
     ZEND_PARSE_PARAMETERS_NONE();
     int handle = peer_require_open(ZEND_THIS);
@@ -194,6 +233,25 @@ PHP_METHOD(PeerConnection, localDescription) {
     RETURN_STRINGL(buffer, (size_t)(end - buffer));
 }
 
+PHP_METHOD(PeerConnection, remoteDescription) {
+    ZEND_PARSE_PARAMETERS_NONE();
+    int handle = peer_require_open(ZEND_THIS);
+    if (handle < 0) RETURN_THROWS();
+    char buffer[RYZERTC_MAX_SDP + 1] = {0};
+    int result = rtcGetRemoteDescription(handle, buffer, sizeof(buffer));
+    if (result == RTC_ERR_NOT_AVAIL) RETURN_NULL();
+    if (result < 0) {
+        zend_throw_error(NULL, "Native remote SDP read failed (%d)", result);
+        RETURN_THROWS();
+    }
+    const char *end = memchr(buffer, '\\0', sizeof(buffer));
+    if (end == NULL) {
+        zend_throw_error(NULL, "Native remote SDP is not NUL terminated");
+        RETURN_THROWS();
+    }
+    RETURN_STRINGL(buffer, (size_t)(end - buffer));
+}
+
 PHP_METHOD(PeerConnection, close) {
     ZEND_PARSE_PARAMETERS_NONE();
     peer_native_close(Z_RYZERTC_PEER_P(ZEND_THIS));
@@ -208,6 +266,8 @@ static const zend_function_entry runtime_methods[] = {
 static const zend_function_entry peer_methods[] = {
     ZEND_ME(PeerConnection, __construct, arginfo_peer_construct, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, setRemoteOffer, arginfo_peer_offer, ZEND_ACC_PUBLIC)
+    ZEND_ME(PeerConnection, addRemoteCandidate, arginfo_peer_candidate, ZEND_ACC_PUBLIC)
+    ZEND_ME(PeerConnection, remoteDescription, arginfo_peer_description, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, beginAnswer, arginfo_peer_void, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, localDescription, arginfo_peer_description, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, close, arginfo_peer_void, ZEND_ACC_PUBLIC)
