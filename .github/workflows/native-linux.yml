@@ -116,7 +116,28 @@ jobs:
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.build/backend-install/lib"
           .build/pocketmine/bin/php7/bin/php -n -v
           .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" --ri ryzertc
-          .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php
+          echo "[RyzeRTC] PocketMine baseline without native peer"
+          .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" -r 'echo "pocketmine baseline OK\n";'
+          echo "[RyzeRTC] PocketMine exact-runtime GDB lifecycle trace"
+          set +e
+          timeout 45s gdb -q --batch \
+            -ex 'set pagination off' \
+            -ex 'set print thread-events off' \
+            -ex 'run' \
+            -ex 'thread apply all bt 25' \
+            --args .build/pocketmine/bin/php7/bin/php -n \
+              -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php \
+            2>&1 | tee .build/pocketmine-gdb.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eq 'Program received signal SIGSEGV|Program terminated with signal SIGSEGV|Segmentation fault' .build/pocketmine-gdb.log; then
+            echo "::error::RyzeRTC SIGSEGV in exact PocketMine PHP; see GDB stack"
+            exit 139
+          fi
+          if [[ "$status" -ne 0 ]] || ! grep -F 'exited normally' .build/pocketmine-gdb.log >/dev/null; then
+            echo "::error::RyzeRTC test did not complete normally in PocketMine PHP"
+            exit 1
+          fi
       - name: Pack experimental binary and third-party notices
         shell: bash
         run: |
