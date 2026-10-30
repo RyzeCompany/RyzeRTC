@@ -43,7 +43,7 @@ try {
                 $flush($b, $pendingB);
                 $b->beginAnswer();
             } elseif ($event['type'] === 'candidate') {
-                if ($answerSet) {
+                if ($offerSet) {
                     $b->addRemoteCandidate($event['data'], $event['detail']);
                 } else {
                     $pendingB[] = [$event['data'], $event['detail']];
@@ -64,7 +64,7 @@ try {
                 $flush($a, $pendingA);
                 $flush($b, $pendingB);
             } elseif ($event['type'] === 'candidate') {
-                if ($offerSet) {
+                if ($answerSet) {
                     $a->addRemoteCandidate($event['data'], $event['detail']);
                 } else {
                     $pendingA[] = [$event['data'], $event['detail']];
