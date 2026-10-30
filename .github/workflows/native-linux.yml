@@ -103,6 +103,10 @@ jobs:
             echo "::error::RyzeRTC native lifecycle did not terminate normally (gdb status=$status)"
             exit 1
           fi
+          echo "[RyzeRTC] Repeat shutdown under PHP 8.4.27 (no debugger)"
+          for i in $(seq 1 12); do
+            php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/shutdown.php
+          done
       - name: Validate against exact official PocketMine PHP used by Egg
         shell: bash
         run: |
@@ -138,6 +142,10 @@ jobs:
             echo "::error::RyzeRTC test did not complete normally in PocketMine PHP"
             exit 1
           fi
+          echo "[RyzeRTC] Repeat shutdown under exact PocketMine PHP 8.4.16 (no debugger)"
+          for i in $(seq 1 12); do
+            .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/shutdown.php
+          done
       - name: Pack experimental binary and third-party notices
         shell: bash
         run: |

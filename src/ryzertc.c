@@ -36,7 +36,8 @@ static void peer_native_close(ryzertc_peer *peer) {
     if (peer->handle >= 0) {
         int handle = peer->handle;
         peer->handle = -1;
-        rtcClosePeerConnection(handle);
+        /* rtcDeletePeerConnection already closes the underlying connection.
+         * Closing twice can race with pending libdatachannel worker jobs. */
         rtcDeletePeerConnection(handle);
     }
 }
@@ -229,6 +230,18 @@ PHP_MINIT_FUNCTION(ryzertc) {
     return SUCCESS;
 }
 
+/*
+ * libdatachannel has process-global asynchronous workers. Releasing individual
+ * peer handles does not synchronously drain those workers. Without rtcCleanup()
+ * the loader may unmap their code / process-global locks on PHP exit, causing
+ * a SIGSEGV in a background pthread. PHP MSHUTDOWN runs after request teardown
+ * while this extension and its native dependencies are still resident.
+ */
+PHP_MSHUTDOWN_FUNCTION(ryzertc) {
+    rtcCleanup(); /* Drains and joins global WebRTC workers, up to 10s. */
+    return SUCCESS;
+}
+
 PHP_MINFO_FUNCTION(ryzertc) {
     php_info_print_table_start();
     php_info_print_table_header(2, "RyzeRTC support", "enabled");
@@ -241,7 +254,7 @@ zend_module_entry ryzertc_module_entry = {
     "ryzertc",
     NULL,
     PHP_MINIT(ryzertc),
-    NULL,
+    PHP_MSHUTDOWN(ryzertc),
     NULL,
     NULL,
     PHP_MINFO(ryzertc),
