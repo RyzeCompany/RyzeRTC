@@ -20,13 +20,14 @@ var_dump(RyzeRTC\Runtime::capabilities());
 
 $peer = new RyzeRTC\PeerConnection('127.0.0.1', 19134, true);
 $peer->setRemoteOffer($trustedOfferSdp);
+$peer->addRemoteCandidate($trustedIceCandidate, $trustedMediaId);
 $peer->beginAnswer();
 // Native ICE gathers asynchronously; poll until localDescription() is available.
 $answer = $peer->localDescription();
 $peer->close();
 ```
 
-The sample shows the *Phase 1 API shape*. Never treat untrusted SDP or an open native peer as a verified Minecraft player. All client identity verification and shared-UDP routing are separate security-sensitive stages.
+ICE candidates and SDP are bounded and validated for basic syntax, but **calling these methods does not verify a Minecraft identity**. The sample shows the *Phase 1 API shape*. Never treat untrusted SDP or an open native peer as a verified Minecraft player. All client identity verification and shared-UDP routing are separate security-sensitive stages.
 
 ## Build and test
 
@@ -54,7 +55,7 @@ LD_LIBRARY_PATH=/path/to/libdatachannel/install/lib \
 ## Roadmap
 
 - [x] Standalone RyzeCompany repository, native module and PHP 8.4 ABI design.
-- [x] Initial native peer creation/destruction and SDP interfaces.
+- [x] Initial native peer creation/destruction, SDP inspection and bounded remote ICE-candidate APIs.
 - [ ] Native asynchronous gathering/state event queue with bounded resource limits.
 - [ ] Reliable and unreliable DataChannels (SCTP), backpressure, teardown tests.
 - [ ] DTLS fingerprint binding, Minecraft official identity verification and shared UDP RakNet coexistence.
