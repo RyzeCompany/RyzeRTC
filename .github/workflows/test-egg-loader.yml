@@ -35,8 +35,8 @@ jobs:
           phpbin="$GITHUB_WORKSPACE/.test-egg/bin/php7/bin/php"
           destination="$GITHUB_WORKSPACE/.test-runtime/.ryzertc-runtime"
           mkdir -p .test-runtime
-          sha='392f8f62e521da03ed9960881010634f86a6345bbe5452ab065c9ca6aa24614f'
-          bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.1 "$sha" "$destination"
+          sha='f5fa7e5babc456a9e33a4c8c6c864c1b510841c79eef868fad1e78787d1daa5f'
+          bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.2 "$sha" "$destination"
           test -s "$destination/ryzertc.so"
           test -s "$destination/lib/libdatachannel.so.0.24"
           LD_LIBRARY_PATH="$destination/lib" "$phpbin" -n \
@@ -49,7 +49,7 @@ jobs:
           phpbin="$GITHUB_WORKSPACE/.test-egg/bin/php7/bin/php"
           destination="$GITHUB_WORKSPACE/.test-runtime/.ryzertc-runtime"
           before="$(sha256sum "$destination/ryzertc.so" | cut -d ' ' -f1)"
-          if bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.1 \
+          if bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.2 \
             0000000000000000000000000000000000000000000000000000000000000000 "$destination"; then
             echo "::error::Installer accepted an invalid pinned SHA-256"
             exit 1
