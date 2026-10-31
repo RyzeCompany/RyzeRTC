@@ -24,8 +24,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          verified_sha='f3b3b6c33b933794c65c8bdc317eb850e2ebf314'
-          verified_run='41150376374'
+          verified_sha='24136b455807bbf81decb42dbaf0a3af978f41c7'
+          verified_run='41155802055'
           # The publish-only commits must not alter the tested native sources.
           git diff --exit-code "$verified_sha" "$GITHUB_SHA" -- \
             src tests config.m4 php_ryzertc.h .github/workflows/native-linux.yml
@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p package inspect
-          gh run download 41150376374 --repo "$GITHUB_REPOSITORY" \
+          gh run download 41155802055 --repo "$GITHUB_REPOSITORY" \
             --name RyzeRTC-PHP84-Linux-ZTS-EXPERIMENTAL --dir package
           test -s package/ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip
           mv package/ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip \
@@ -64,12 +64,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag='v0.1.0-dev.2'
+          tag='v0.1.0-dev.3'
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-              --title 'RyzeRTC 0.1.0-dev.2 · Debian 12 / PHP 8.4 ZTS (experimental)' \
-              --notes 'First-party RyzeCompany native PHP extension rebuilt on Debian 12 to eliminate the GLIBC_2.38 dependency seen in Pterodactyl installers. Validated against official PocketMine PHP 8.4 ZTS: clean shutdown, real ICE/DTLS and bidirectional binary SCTP DataChannels, including explicit channel teardown. Requires matching PHP 8.4 ZTS Linux x86_64 and native shared libraries. This is an EXPERIMENTAL preview, not a complete Minecraft Bedrock 1.26.60 transport; first-party authenticated signaling, shared RakNet UDP and real-client joins remain integration work. Never load this binary from within a PHAR.'
+              --title 'RyzeRTC 0.1.0-dev.3 · Debian 12 / PHP 8.4 ZTS (experimental)' \
+              --notes 'First-party RyzeCompany native PHP extension, API 2, built and tested on Debian 12. Adds selected ICE endpoint, validated DataChannel metadata, binary/text event identification and terminal event-queue overflow reporting for authenticated RyzeMP integration. Validated against official PocketMine PHP 8.4 ZTS: clean shutdown, real ICE/DTLS and bidirectional binary SCTP DataChannels, including explicit channel teardown. Requires matching PHP 8.4 ZTS Linux x86_64 and native shared libraries. This is an EXPERIMENTAL preview, not a complete Minecraft Bedrock 1.26.60 transport; first-party authenticated signaling, shared RakNet UDP and real-client joins remain integration work. Never load this binary from within a PHAR.'
           fi
           gh release upload "$tag" ryzertc-linux-x86_64-php84-zts.zip SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --clobber
