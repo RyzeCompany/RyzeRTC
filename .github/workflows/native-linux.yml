@@ -37,8 +37,17 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             build-essential autoconf automake libtool bison re2c cmake ninja-build ca-certificates \
-            git curl xz-utils pkg-config libssl-dev libxml2-dev zip gdb
+            git curl xz-utils pkg-config libssl-dev libxml2-dev zip gdb zstd
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            .build/php
+            .build/backend-install
+            .build/libdatachannel
+          key: ryzertc-debian12-php8427-datachannel0246-v1
       - name: Build pinned PHP 8.4.27 ZTS with matching phpize
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -55,6 +64,7 @@ jobs:
           make install
           "$GITHUB_WORKSPACE/.build/php/bin/php" -n -v
       - name: Build pinned libdatachannel from upstream C/C++ source
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -74,6 +84,14 @@ jobs:
             -DUSE_SYSTEM_USRSCTP=OFF -DUSE_SYSTEM_PLOG=OFF
           cmake --build .build/backend --parallel 2
           cmake --install .build/backend
+      - uses: actions/cache/save@v4
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .build/php
+            .build/backend-install
+            .build/libdatachannel
+          key: ryzertc-debian12-php8427-datachannel0246-v1
       - name: Compile standalone RyzeRTC PHP extension
         shell: bash
         run: |
