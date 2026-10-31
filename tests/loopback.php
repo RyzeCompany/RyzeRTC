@@ -98,8 +98,11 @@ try {
             'messageA' => $receivedA,
         ], JSON_THROW_ON_ERROR));
     }
-    echo "RyzeRTC native ICE/DTLS/SCTP binary loopback OK\n";
 } finally {
+    fwrite(STDERR, "[RyzeRTC-test] Closing peer A\n");
     $a->close();
+    fwrite(STDERR, "[RyzeRTC-test] Closing peer B\n");
     $b->close();
+    fwrite(STDERR, "[RyzeRTC-test] Peer close methods completed\n");
 }
+echo "RyzeRTC native ICE/DTLS/SCTP binary loopback and peer close OK\n";
