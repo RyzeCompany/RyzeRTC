@@ -1,0 +1,75 @@
+name: Publish first-party RyzeRTC native preview
+
+on:
+  push:
+    branches: [feature/native-bootstrap-php84-linux]
+    paths: ['.github/workflows/publish-native-preview.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check verified native source and test provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          verified_sha='24136b455807bbf81decb42dbaf0a3af978f41c7'
+          verified_run='41155802055'
+          # The publish-only commits must not alter the tested native sources.
+          git diff --exit-code "$verified_sha" "$GITHUB_SHA" -- \
+            src tests config.m4 php_ryzertc.h .github/workflows/native-linux.yml
+          outcome="$(gh run view "$verified_run" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+          source="$(gh run view "$verified_run" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')"
+          test "$outcome" = success
+          test "$source" = "$verified_sha"
+      - name: Retrieve tested native archive from successful CI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p package inspect
+          gh run download 41155802055 --repo "$GITHUB_REPOSITORY" \
+            --name RyzeRTC-PHP84-Linux-ZTS-EXPERIMENTAL --dir package
+          test -s package/ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip
+          mv package/ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip \
+            ryzertc-linux-x86_64-php84-zts.zip
+          unzip -t ryzertc-linux-x86_64-php84-zts.zip >/dev/null
+          unzip -q ryzertc-linux-x86_64-php84-zts.zip -d inspect
+          (cd inspect && sha256sum -c --status SHA256SUMS.txt)
+          test -s inspect/ryzertc.so
+          test -d inspect/lib
+          python3 - <<'PY'
+          import json
+          a=json.load(open('inspect/php-abi.json'))
+          assert a['php']=='8.4' and a['php_api']==20240924
+          assert a['zts'] is True and a['architecture']=='x86_64'
+          PY
+          sha256sum ryzertc-linux-x86_64-php84-zts.zip > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+      - name: Publish immutable preview tag and assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='v0.1.0-dev.3'
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+              --title 'RyzeRTC 0.1.0-dev.3 · Debian 12 / PHP 8.4 ZTS (experimental)' \
+              --notes 'First-party RyzeCompany native PHP extension, API 2, built and tested on Debian 12. Adds selected ICE endpoint, validated DataChannel metadata, binary/text event identification and terminal event-queue overflow reporting for authenticated RyzeMP integration. Validated against official PocketMine PHP 8.4 ZTS: clean shutdown, real ICE/DTLS and bidirectional binary SCTP DataChannels, including explicit channel teardown. Requires matching PHP 8.4 ZTS Linux x86_64 and native shared libraries. This is an EXPERIMENTAL preview, not a complete Minecraft Bedrock 1.26.60 transport; first-party authenticated signaling, shared RakNet UDP and real-client joins remain integration work. Never load this binary from within a PHAR.'
+          fi
+          gh release upload "$tag" ryzertc-linux-x86_64-php84-zts.zip SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --clobber

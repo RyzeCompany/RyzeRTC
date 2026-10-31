@@ -1,0 +1,198 @@
+name: RyzeRTC Linux PHP 8.4 native
+
+on:
+  push:
+    branches: [main, feature/native-bootstrap-php84-linux]
+    paths:
+      - 'src/**'
+      - 'php_ryzertc.h'
+      - 'config.m4'
+      - 'tests/**'
+      - '.github/workflows/native-linux.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryzertc-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    # Debian 12 glibc 2.36 is the compatibility baseline of the RyzeMP Egg.
+    # Binaries built on Ubuntu 24.04 require GLIBC_2.38 and cannot load there.
+    container:
+      image: debian:12
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool bison re2c cmake ninja-build ca-certificates \
+            git curl xz-utils pkg-config libssl-dev libxml2-dev zip gdb zstd
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        with:
+          path: |
+            .build/php
+            .build/backend-install
+            .build/libdatachannel
+          key: ryzertc-debian12-php8427-datachannel0246-v1
+      - name: Build pinned PHP 8.4.27 ZTS with matching phpize
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/php-src .build/php
+          curl --fail --location --retry 3 --connect-timeout 15 \
+            'https://www.php.net/distributions/php-8.4.27.tar.xz' -o .build/php-8.4.27.tar.xz
+          echo 'dcf93923b0e38e0d5252b25b796520b5a47761a08b3488b6d0b5d1115764d3f0  .build/php-8.4.27.tar.xz' | sha256sum -c -
+          tar -xf .build/php-8.4.27.tar.xz -C .build/php-src --strip-components=1
+          cd .build/php-src
+          ./configure --prefix="$GITHUB_WORKSPACE/.build/php" \
+            --disable-all --enable-cli --enable-zts --disable-cgi \
+            --disable-phpdbg --without-pear --with-openssl
+          make -j2
+          make install
+          "$GITHUB_WORKSPACE/.build/php/bin/php" -n -v
+      - name: Build pinned libdatachannel from upstream C/C++ source
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v0.24.6 \
+            https://github.com/paullouisageneau/libdatachannel.git .build/libdatachannel
+          git -C .build/libdatachannel rev-parse HEAD | \
+            grep -Fx '6b1e2e620f1e37f0eafeee702eaea0043cb305fd'
+          git -C .build/libdatachannel submodule update --init --recursive --depth 1
+          cmake -S .build/libdatachannel -B .build/backend -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/.build/backend-install" \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_DEPS_LIBS=OFF \
+            -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_TESTS=ON -DNO_EXAMPLES=ON \
+            -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=OFF \
+            -DUSE_NICE=OFF -DUSE_SYSTEM_JUICE=OFF \
+            -DUSE_SYSTEM_USRSCTP=OFF -DUSE_SYSTEM_PLOG=OFF
+          cmake --build .build/backend --parallel 2
+          cmake --install .build/backend
+      - uses: actions/cache/save@v4
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .build/php
+            .build/backend-install
+            .build/libdatachannel
+          key: ryzertc-debian12-php8427-datachannel0246-v1
+      - name: Compile standalone RyzeRTC PHP extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/.build/php/bin:$PATH"
+          phpize
+          ./configure \
+            --with-php-config="$GITHUB_WORKSPACE/.build/php/bin/php-config" \
+            --with-ryzertc="$GITHUB_WORKSPACE/.build/backend-install"
+          make -j2
+          test -s modules/ryzertc.so
+          # Ensure the native module and its WebRTC dependency are linked for Debian 12.
+          getconf GNU_LIBC_VERSION | grep -Fx 'glibc 2.36'
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.build/backend-install/lib"
+          php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" --ri ryzertc
+          echo "[RyzeRTC] Baseline: load and unload module without peers"
+          php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" -r 'echo "No-peer test OK\n";'
+          echo "[RyzeRTC] Native peer lifecycle: run under GDB for verified exit status and stack trace"
+          set +e
+          timeout 45s gdb -q --batch \
+            -ex 'set pagination off' \
+            -ex 'set print thread-events off' \
+            -ex 'run' \
+            -ex 'thread apply all bt 20' \
+            --args php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php \
+            2>&1 | tee .build/ryzertc-gdb.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eq 'Program received signal SIGSEGV|Program terminated with signal SIGSEGV|Segmentation fault' .build/ryzertc-gdb.log; then
+            echo "::error::RyzeRTC SIGSEGV in native shutdown; inspect GDB backtrace"
+            exit 139
+          fi
+          if [[ "$status" -ne 0 ]] || ! grep -F 'exited normally' .build/ryzertc-gdb.log >/dev/null; then
+            echo "::error::RyzeRTC native lifecycle did not terminate normally (gdb status=$status)"
+            exit 1
+          fi
+          echo "[RyzeRTC] Repeat shutdown under PHP 8.4.27 (no debugger)"
+          for i in $(seq 1 12); do
+            php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/shutdown.php
+          done
+          echo "[RyzeRTC] Full native offer/answer, ICE/DTLS and binary SCTP loopback"
+          timeout 35s php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/loopback.php
+      - name: Validate against exact official PocketMine PHP used by Egg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/pocketmine
+          curl --fail --location --silent --show-error --retry 3 \
+            'https://github.com/pmmp/PHP-Binaries/releases/download/pm5-php-8.4-latest/PHP-8.4-Linux-x86_64-PM5.tar.gz' \
+            -o .build/pocketmine-php.tar.gz
+          echo '5b9a1a8f103f7b91670336495b531d9a75c05cca3bd544251a7b63d2124bcc6c  .build/pocketmine-php.tar.gz' | sha256sum -c -
+          tar -xzf .build/pocketmine-php.tar.gz -C .build/pocketmine
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.build/backend-install/lib"
+          .build/pocketmine/bin/php7/bin/php -n -v
+          .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" --ri ryzertc
+          echo "[RyzeRTC] PocketMine baseline without native peer"
+          .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" -r 'echo "pocketmine baseline OK\n";'
+          echo "[RyzeRTC] PocketMine exact-runtime GDB lifecycle trace"
+          set +e
+          timeout 45s gdb -q --batch \
+            -ex 'set pagination off' \
+            -ex 'set print thread-events off' \
+            -ex 'run' \
+            -ex 'thread apply all bt 25' \
+            --args .build/pocketmine/bin/php7/bin/php -n \
+              -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/smoke.php \
+            2>&1 | tee .build/pocketmine-gdb.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if grep -Eq 'Program received signal SIGSEGV|Program terminated with signal SIGSEGV|Segmentation fault' .build/pocketmine-gdb.log; then
+            echo "::error::RyzeRTC SIGSEGV in exact PocketMine PHP; see GDB stack"
+            exit 139
+          fi
+          if [[ "$status" -ne 0 ]] || ! grep -F 'exited normally' .build/pocketmine-gdb.log >/dev/null; then
+            echo "::error::RyzeRTC test did not complete normally in PocketMine PHP"
+            exit 1
+          fi
+          echo "[RyzeRTC] Repeat shutdown under exact PocketMine PHP 8.4.16 (no debugger)"
+          for i in $(seq 1 12); do
+            .build/pocketmine/bin/php7/bin/php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/shutdown.php
+          done
+          echo "[RyzeRTC] Bidirectional native DataChannel test under exact Egg PHP"
+          timeout 35s .build/pocketmine/bin/php7/bin/php -n \
+            -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" tests/loopback.php
+      - name: Pack experimental binary and third-party notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/lib dist/licenses
+          cp modules/ryzertc.so dist/ryzertc.so
+          cp -a .build/backend-install/lib/libdatachannel.so* dist/lib/
+          cp LICENSE dist/licenses/RyzeRTC-MIT.txt
+          cp .build/libdatachannel/LICENSE dist/licenses/libdatachannel-MPL-2.0.txt
+          cp THIRD_PARTY.md dist/licenses/THIRD_PARTY.md
+          echo '{"php":"8.4","php_api":20240924,"zts":true,"architecture":"x86_64","stage":"experimental"}' > dist/php-abi.json
+          (cd dist && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+          (cd dist && zip -qr "../ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip" .)
+          sha256sum ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RyzeRTC-PHP84-Linux-ZTS-EXPERIMENTAL
+          path: ryzertc-linux-x86_64-php84-zts-EXPERIMENTAL.zip
+          retention-days: 14
+          if-no-files-found: error
