@@ -117,6 +117,17 @@ static void ryzertc_free_event(ryzertc_event *e) {
     free(e->detail);
     free(e);
 }
+static size_t ryzertc_list_channels(uintptr_t token, int *ids, size_t cap) {
+    size_t n = 0;
+    pthread_mutex_lock(&ryzertc_lock);
+    for (ryzertc_owner *it = ryzertc_owners; it != NULL; it = it->next) {
+        if (it->token == token && it->channel >= 0 && n < cap) {
+            ids[n++] = it->channel;
+        }
+    }
+    pthread_mutex_unlock(&ryzertc_lock);
+    return n;
+}
 static void ryzertc_unregister_peer(uintptr_t token) {
     pthread_mutex_lock(&ryzertc_lock);
     ryzertc_owner **owner = &ryzertc_owners;
@@ -261,10 +272,18 @@ static void peer_native_close(ryzertc_peer *peer) {
     if (peer->handle >= 0) {
         int handle = peer->handle;
         peer->handle = -1;
+        int channels[RYZERTC_MAX_CHANNELS_PER_PEER] = {0};
+        size_t count = ryzertc_list_channels(peer->token, channels,
+            RYZERTC_MAX_CHANNELS_PER_PEER);
+        /* Revoke event ownership before touching native handles. */
         ryzertc_unregister_peer(peer->token);
         peer->token = 0;
-        /* rtcDeletePeerConnection already closes the underlying connection.
-         * Closing twice can race with pending libdatachannel worker jobs. */
+        /* Delete SCTP channels before deleting the underlying connection.
+         * libdatachannel keeps channel objects in its process-global C API
+         * registry even after the peer handle is erased. */
+        for (size_t i = 0; i < count; ++i) {
+            rtcDeleteDataChannel(channels[i]);
+        }
         rtcDeletePeerConnection(handle);
     }
 }
