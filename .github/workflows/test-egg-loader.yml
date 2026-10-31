@@ -1,0 +1,58 @@
+name: RyzeRTC Egg installer integration (official release)
+
+on:
+  push:
+    branches: [feature/native-bootstrap-php84-linux]
+    paths: ['scripts/**', '.github/workflows/test-egg-loader.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check installer shell syntax
+        run: bash -n scripts/install-egg-runtime.sh
+      - name: Fetch same official PocketMine PHP binary used by RyzeMP Egg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .test-egg
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/pmmp/PHP-Binaries/releases/download/pm5-php-8.4-latest/PHP-8.4-Linux-x86_64-PM5.tar.gz' \
+            -o .test-egg/php.tar.gz
+          echo '5b9a1a8f103f7b91670336495b531d9a75c05cca3bd544251a7b63d2124bcc6c  .test-egg/php.tar.gz' | sha256sum -c -
+          tar -xzf .test-egg/php.tar.gz -C .test-egg
+          .test-egg/bin/php7/bin/php -n -v
+      - name: Install verified RyzeCompany tagged release outside PHAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          phpbin="$GITHUB_WORKSPACE/.test-egg/bin/php7/bin/php"
+          destination="$GITHUB_WORKSPACE/.test-runtime/.ryzertc-runtime"
+          mkdir -p .test-runtime
+          sha='392f8f62e521da03ed9960881010634f86a6345bbe5452ab065c9ca6aa24614f'
+          bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.1 "$sha" "$destination"
+          test -s "$destination/ryzertc.so"
+          test -s "$destination/lib/libdatachannel.so.0.24"
+          LD_LIBRARY_PATH="$destination/lib" "$phpbin" -n \
+            -d "extension=$destination/ryzertc.so" -r \
+            'if(!extension_loaded("ryzertc") || !class_exists("RyzeRTC\\Runtime")) exit(1); echo RyzeRTC\Runtime::version(), "\n";'
+      - name: Rejected checksum cannot replace already installed runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          phpbin="$GITHUB_WORKSPACE/.test-egg/bin/php7/bin/php"
+          destination="$GITHUB_WORKSPACE/.test-runtime/.ryzertc-runtime"
+          before="$(sha256sum "$destination/ryzertc.so" | cut -d ' ' -f1)"
+          if bash scripts/install-egg-runtime.sh "$phpbin" v0.1.0-dev.1 \
+            0000000000000000000000000000000000000000000000000000000000000000 "$destination"; then
+            echo "::error::Installer accepted an invalid pinned SHA-256"
+            exit 1
+          fi
+          after="$(sha256sum "$destination/ryzertc.so" | cut -d ' ' -f1)"
+          test "$before" = "$after"
