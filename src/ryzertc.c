@@ -376,6 +376,8 @@ PHP_METHOD(PeerConnection, __construct) {
     config.bindAddress = ip;
     config.enableIceTcp = false;
     config.enableIceUdpMux = mux;
+    /* RyzeRTC uses an explicit authenticated offer/answer lifecycle. */
+    config.disableAutoNegotiation = true;
     config.portRangeBegin = (uint16_t) port;
     config.portRangeEnd = (uint16_t) port;
     config.maxMessageSize = 262144;
