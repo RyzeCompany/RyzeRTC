@@ -22,6 +22,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    # Debian 12 glibc 2.36 is the compatibility baseline of the RyzeMP Egg.
+    # Binaries built on Ubuntu 24.04 require GLIBC_2.38 and cannot load there.
+    container:
+      image: debian:12
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
@@ -29,9 +34,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential autoconf automake libtool bison re2c cmake ninja-build \
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential autoconf automake libtool bison re2c cmake ninja-build ca-certificates \
             git curl xz-utils pkg-config libssl-dev libxml2-dev zip gdb
       - name: Build pinned PHP 8.4.27 ZTS with matching phpize
         shell: bash
@@ -80,6 +85,8 @@ jobs:
             --with-ryzertc="$GITHUB_WORKSPACE/.build/backend-install"
           make -j2
           test -s modules/ryzertc.so
+          # Ensure the native module and its WebRTC dependency are linked for Debian 12.
+          getconf GNU_LIBC_VERSION | grep -Fx 'glibc 2.36'
           export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/.build/backend-install/lib"
           php -n -d "extension=$GITHUB_WORKSPACE/modules/ryzertc.so" --ri ryzertc
           echo "[RyzeRTC] Baseline: load and unload module without peers"
