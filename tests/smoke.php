@@ -18,7 +18,7 @@ $peer = new RyzeRTC\PeerConnection("127.0.0.1", 0, false);
 if ($peer->pollEvents() !== []) {
     throw new RuntimeException('New peer unexpectedly has pending events');
 }
-foreach (['', str_repeat('x', 129), "bad\\0label"] as $label) {
+foreach (['', str_repeat('x', 129), "bad\0label"] as $label) {
     try {
         $peer->createDataChannel($label);
         throw new RuntimeException('Invalid channel label was accepted');
