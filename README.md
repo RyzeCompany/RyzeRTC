@@ -4,7 +4,7 @@
 
 RyzeRTC is RyzeCompany's own PHP extension, delivered as a native Linux `ryzertc.so` file independently of RyzeMP's PHAR. It uses [libdatachannel](https://github.com/paullouisageneau/libdatachannel) as a lower-level open-source C/C++ WebRTC engine, while the PHP extension and integration API are maintained by RyzeCompany.
 
-> **Status: experimental native transport.** DataChannels and a bounded, mutex-protected event queue have been implemented and **verified** in real ICE/DTLS/SCTP bidirectional loopback under the exact official Egg PHP (see [passing native CI](https://github.com/RyzeCompany/RyzeRTC/actions/runs/41148078294)). Native feature availability is not sufficient to admit Minecraft 1.26.60 users: HTTP signaling, official identity binding, shared RakNet UDP and Bedrock login remain separate tasks.
+> **Status: experimental native transport.** Builds for the Egg target **Debian 12 / glibc 2.36**; previous v0.1.0-dev.1 binaries compiled on Ubuntu 24.04 are incompatible with the Debian 12 Egg and must not be installed there. DataChannels and a bounded, mutex-protected event queue have been implemented and **verified** in real ICE/DTLS/SCTP bidirectional loopback under the exact official Egg PHP (see [passing native CI](https://github.com/RyzeCompany/RyzeRTC/actions/runs/41148078294)). Native feature availability is not sufficient to admit Minecraft 1.26.60 users: HTTP signaling, official identity binding, shared RakNet UDP and Bedrock login remain separate tasks.
 
 ## Native PHP API
 
@@ -44,7 +44,7 @@ The workflow [native-linux.yml](.github/workflows/native-linux.yml):
 3. Compiles RyzeRTC's own `ryzertc.so` using `phpize`.
 4. Runs native smoke, teardown under GDB and real ICE/DTLS/SCTP bidirectional binary loopback (including embedded NUL bytes).
 5. Verifies the module against the **official PocketMine PHP 8.4.16 ZTS runtime** used by the existing RyzeMP Egg.
-6. Uploads an experimental CI package. Separately, the [first-party tagged prerelease](https://github.com/RyzeCompany/RyzeRTC/releases/tag/v0.1.0-dev.1) distributes the tested native runtime, shared libraries, license notices and SHA-256 checksums.
+6. Uploads an experimental CI package. Separately, the [first-party tagged prerelease](https://github.com/RyzeCompany/RyzeRTC/releases/tag/v0.1.0-dev.2) distributes the tested native runtime, shared libraries, license notices and SHA-256 checksums.
 
 On a prepared Linux x86_64 build host with a matching ZTS PHP 8.4 `phpize`/`php-config` and a local libdatachannel install:
 
@@ -56,7 +56,7 @@ LD_LIBRARY_PATH=/path/to/libdatachannel/install/lib \
   php -n -d extension="$PWD/modules/ryzertc.so" tests/smoke.php
 ```
 
-**Distribution:** An experimental prerelease, `v0.1.0-dev.1`, is now published. The Egg installer `scripts/install-egg-runtime.sh` downloads that exact tagged archive with a pinned SHA-256, verifies its inner manifest, tests it with the installed PHP and leaves plugins/worlds/PHAR untouched. The [installer CI](https://github.com/RyzeCompany/RyzeRTC/actions/runs/41148519352) verifies loading from the actual release and checksum rejection. **The Egg JSON and RyzeMP session adapter are not integrated yet.** Never announce Bedrock 2225 connectivity merely because the `.so` loads. Use existing `server-ip` and `server-port` once the signaling/UDP shared-port adapter is complete.
+**Distribution:** An experimental prerelease, `v0.1.0-dev.2`, is now published. The Egg installer `scripts/install-egg-runtime.sh` downloads that exact tagged archive with a pinned SHA-256, verifies its inner manifest, tests it with the installed PHP and leaves plugins/worlds/PHAR untouched. The [installer CI](https://github.com/RyzeCompany/RyzeRTC/actions/runs/41148519352) verifies loading from the actual release and checksum rejection. **The Egg JSON and RyzeMP session adapter are not integrated yet.** Never announce Bedrock 2225 connectivity merely because the `.so` loads. Use existing `server-ip` and `server-port` once the signaling/UDP shared-port adapter is complete.
 
 ## Roadmap
 
