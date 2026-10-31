@@ -42,7 +42,7 @@ test -f ryzertc.so && test -f SHA256SUMS.txt && test -d lib
 sha256sum -c --status SHA256SUMS.txt
 LD_LIBRARY_PATH="$TEMP/extract/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   "$PHP_BIN" -n -d "extension=$TEMP/extract/ryzertc.so" \
-  -r 'if (!extension_loaded("ryzertc") || !class_exists("RyzeRTC\\Runtime")) exit(1); echo "RyzeRTC ", RyzeRTC\Runtime::version(), " validated\n";'
+  -r 'if (!extension_loaded("ryzertc") || !class_exists("RyzeRTC\\Runtime") || RyzeRTC\Runtime::apiVersion() < 2) exit(1); echo "RyzeRTC ", RyzeRTC\Runtime::version(), " validated\n";'
 cd "$PARENT"
 # Replace only the native runtime: never mutate plugins, PHAR, or world directories.
 rm -rf -- "${DEST}.previous"
