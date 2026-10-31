@@ -17,7 +17,7 @@ for ($i = 0; $i < 20; ++$i) {
 }
 
 gc_collect_cycles();
-if (RyzeRTC\Runtime::apiVersion() !== 1) {
+if (RyzeRTC\Runtime::apiVersion() !== 2) {
     throw new RuntimeException('Invalid runtime API version');
 }
 echo "Clean shutdown regression complete\n";

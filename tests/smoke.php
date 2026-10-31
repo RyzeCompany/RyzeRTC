@@ -4,7 +4,7 @@ declare(strict_types=1);
 if (!extension_loaded('ryzertc')) {
     throw new RuntimeException('Missing RyzeRTC native module');
 }
-if (RyzeRTC\Runtime::apiVersion() !== 1) {
+if (RyzeRTC\Runtime::apiVersion() !== 2) {
     throw new RuntimeException('Unexpected RyzeRTC API version');
 }
 $features = RyzeRTC\Runtime::capabilities();

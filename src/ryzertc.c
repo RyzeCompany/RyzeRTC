@@ -42,6 +42,7 @@ typedef struct ryzertc_owner {
     int peer;
     int channel; /* -1 for a peer connection */
     uintptr_t token;
+    bool overflow; /* terminal: never silently lose reliable game bytes */
     struct ryzertc_owner *next;
 } ryzertc_owner;
 
@@ -152,20 +153,26 @@ static void ryzertc_unregister_peer(uintptr_t token) {
     for (ryzertc_event *p = ryzertc_first; p; p = p->next) ryzertc_last = p;
     pthread_mutex_unlock(&ryzertc_lock);
 }
+static void ryzertc_mark_overflow(uintptr_t token) {
+    pthread_mutex_lock(&ryzertc_lock);
+    for (ryzertc_owner *o = ryzertc_owners; o; o = o->next)
+        if (o->token == token && o->channel == -1) o->overflow = true;
+    pthread_mutex_unlock(&ryzertc_lock);
+}
 static void ryzertc_enqueue(uintptr_t token, int peer, int channel,
         const char *kind, const char *data, size_t len, const char *detail, size_t detail_len) {
     if (len > RYZERTC_MAX_MESSAGE || detail_len > RYZERTC_MAX_ICE_MID ||
-        len > RYZERTC_MAX_QUEUE_BYTES - detail_len) return;
+        len > RYZERTC_MAX_QUEUE_BYTES - detail_len) { ryzertc_mark_overflow(token); return; }
     ryzertc_event *ev = calloc(1, sizeof(*ev));
-    if (ev == NULL) return;
+    if (ev == NULL) { ryzertc_mark_overflow(token); return; }
     if (len) {
         ev->data = malloc(len);
-        if (ev->data == NULL) { free(ev); return; }
+        if (ev->data == NULL) { free(ev); ryzertc_mark_overflow(token); return; }
         memcpy(ev->data, data, len);
     }
     if (detail_len) {
         ev->detail = malloc(detail_len);
-        if (ev->detail == NULL) { ryzertc_free_event(ev); return; }
+        if (ev->detail == NULL) { ryzertc_free_event(ev); ryzertc_mark_overflow(token); return; }
         memcpy(ev->detail, detail, detail_len);
     }
     ev->token = token; ev->peer = peer; ev->channel = channel;
@@ -178,6 +185,7 @@ static void ryzertc_enqueue(uintptr_t token, int peer, int channel,
         ryzertc_queue_bytes + len + detail_len > RYZERTC_MAX_QUEUE_BYTES) {
         pthread_mutex_unlock(&ryzertc_lock);
         ryzertc_free_event(ev);
+        ryzertc_mark_overflow(token);
         return;
     }
     if (ryzertc_last != NULL) ryzertc_last->next = ev;
@@ -228,7 +236,7 @@ static void ryzertc_channel_message(int dc, const char *data, int size, void *pt
     size_t len = size >= 0 ? (size_t)size :
         ryzertc_bounded_len(data, RYZERTC_MAX_MESSAGE);
     if (len <= RYZERTC_MAX_MESSAGE)
-        ryzertc_enqueue((uintptr_t)ptr, -1, dc, "message", data, len, NULL, 0);
+        ryzertc_enqueue((uintptr_t)ptr, -1, dc, "message", data, len, size >= 0 ? "binary" : "text", size >= 0 ? 6 : 4);
 }
 static bool ryzertc_attach_channel(uintptr_t token, int pc, int dc) {
     if (!ryzertc_register_channel(token, pc, dc)) return false;
@@ -241,7 +249,10 @@ static bool ryzertc_attach_channel(uintptr_t token, int pc, int dc) {
     return true;
 }
 static void ryzertc_channel_callback(int pc, int dc, void *ptr) {
-    ryzertc_attach_channel((uintptr_t)ptr, pc, dc);
+    if (!ryzertc_attach_channel((uintptr_t)ptr, pc, dc)) {
+        ryzertc_mark_overflow((uintptr_t)ptr);
+        rtcDeleteDataChannel(dc);
+    }
 }
 static bool ryzertc_attach_peer(uintptr_t token, int pc) {
     void *ptr = (void *)token;
@@ -336,6 +347,9 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_send, 0, 2, IS_VOID, 0)
     ZEND_ARG_TYPE_INFO(0, channelId, IS_LONG, 0)
     ZEND_ARG_TYPE_INFO(0, data, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_info, 0, 1, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, channelId, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_peer_poll, 0, 0, IS_ARRAY, 0)
     ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, limit, IS_LONG, 0, "64")
@@ -587,6 +601,44 @@ PHP_METHOD(PeerConnection, createDataChannel) {
     }
     RETURN_LONG(dc);
 }
+/** Selected ICE address, not an untrusted SDP candidate. */
+PHP_METHOD(PeerConnection, remoteAddress) {
+    ZEND_PARSE_PARAMETERS_NONE();
+    int pc = peer_require_open(ZEND_THIS);
+    if (pc < 0) RETURN_THROWS();
+    char buffer[256] = {0};
+    int result = rtcGetRemoteAddress(pc, buffer, sizeof(buffer));
+    if (result == RTC_ERR_NOT_AVAIL) RETURN_NULL();
+    if (result < 0) { zend_throw_error(NULL, "Cannot read selected ICE address (%d)", result); RETURN_THROWS(); }
+    RETURN_STRING(buffer);
+}
+PHP_METHOD(PeerConnection, channelInfo) {
+    zend_long channel;
+    ZEND_PARSE_PARAMETERS_START(1, 1)
+        Z_PARAM_LONG(channel)
+    ZEND_PARSE_PARAMETERS_END();
+    int pc = peer_require_open(ZEND_THIS);
+    if (pc < 0) RETURN_THROWS();
+    uintptr_t token = Z_RYZERTC_PEER_P(ZEND_THIS)->token;
+    if (channel < 0 || channel > INT32_MAX || !ryzertc_owns_channel(token, (int)channel)) {
+        zend_value_error("DataChannel does not belong to this peer"); RETURN_THROWS();
+    }
+    char label[1025] = {0};
+    rtcReliability reliability = {0};
+    int result = rtcGetDataChannelLabel((int)channel, label, sizeof(label));
+    if (result < 0 || rtcGetDataChannelReliability((int)channel, &reliability) < 0) {
+        zend_throw_error(NULL, "Cannot read DataChannel metadata"); RETURN_THROWS();
+    }
+    array_init(return_value);
+    add_assoc_string(return_value, "label", label);
+    add_assoc_bool(return_value, "open", rtcIsOpen((int)channel));
+    add_assoc_bool(return_value, "ordered", !reliability.unordered);
+    add_assoc_bool(return_value, "reliable", !reliability.unreliable);
+    add_assoc_long(return_value, "maxRetransmits", reliability.maxRetransmits);
+    add_assoc_long(return_value, "maxMessageSize", rtcMaxMessageSize((int)channel));
+    add_assoc_long(return_value, "bufferedAmount", rtcGetBufferedAmount((int)channel));
+}
+
 PHP_METHOD(PeerConnection, sendMessage) {
     zend_long channel;
     zend_string *data;
@@ -637,6 +689,22 @@ PHP_METHOD(PeerConnection, pollEvents) {
     int pc = peer_require_open(ZEND_THIS);
     if (pc < 0) RETURN_THROWS();
     uintptr_t token = Z_RYZERTC_PEER_P(ZEND_THIS)->token;
+    bool overflow = false;
+    pthread_mutex_lock(&ryzertc_lock);
+    for (ryzertc_owner *o = ryzertc_owners; o; o = o->next)
+        if (o->token == token && o->channel == -1) overflow = o->overflow;
+    pthread_mutex_unlock(&ryzertc_lock);
+    if (overflow) {
+        array_init(return_value);
+        zval item;
+        array_init(&item);
+        add_assoc_string(&item, "type", "overflow");
+        add_assoc_long(&item, "channel", -1);
+        add_assoc_string(&item, "data", "Native event queue exhausted; close this peer");
+        add_assoc_string(&item, "detail", "");
+        add_next_index_zval(return_value, &item);
+        return;
+    }
     ryzertc_event *first = NULL, *last = NULL;
     pthread_mutex_lock(&ryzertc_lock);
     ryzertc_event **it = &ryzertc_first;
@@ -689,6 +757,8 @@ static const zend_function_entry peer_methods[] = {
     ZEND_ME(PeerConnection, beginOffer, arginfo_peer_void, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, setRemoteAnswer, arginfo_peer_answer, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, createDataChannel, arginfo_peer_channel_create, ZEND_ACC_PUBLIC)
+    ZEND_ME(PeerConnection, remoteAddress, arginfo_peer_description, ZEND_ACC_PUBLIC)
+    ZEND_ME(PeerConnection, channelInfo, arginfo_peer_info, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, sendMessage, arginfo_peer_send, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, pollEvents, arginfo_peer_poll, ZEND_ACC_PUBLIC)
     ZEND_ME(PeerConnection, beginAnswer, arginfo_peer_void, ZEND_ACC_PUBLIC)

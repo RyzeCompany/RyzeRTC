@@ -71,6 +71,8 @@ try {
                 }
             } elseif ($event['type'] === 'channel') {
                 $channelB = $event['channel'];
+                $info = $b->channelInfo($channelB);
+                if ($info['label'] !== 'minecraft' || !$info['ordered'] || !$info['reliable']) throw new RuntimeException('Incorrect channel metadata');
             } elseif ($event['type'] === 'message') {
                 if ($event['data'] !== $payloadA) {
                     throw new RuntimeException('B received corrupt binary payload');
@@ -88,6 +90,7 @@ try {
         }
         usleep(10000);
     }
+    if ($a->remoteAddress() === null || $b->remoteAddress() === null) throw new RuntimeException('Missing selected ICE address');
     if (!$offerSet || !$answerSet || !$readyA || $channelB === null || !$receivedA || !$receivedB) {
         throw new RuntimeException('RyzeRTC native loopback failed: ' . json_encode([
             'offer' => $offerSet,
